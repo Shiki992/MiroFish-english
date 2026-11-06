@@ -433,7 +433,7 @@ class SimulationRunner:
             }
             if (
                 existing and existing.runner_status in active_statuses
-            ) or GraphMemoryManager.get_updater(simulation_id) is not None:
+            ) or GraphMemoryManager.get_updater(simulation_id) is not None or cls.has_live_process(simulation_id):
                 raise ValueError(f"Simulation is already running or finalizing: {simulation_id}")
             cls._save_run_state(state)
         
@@ -617,6 +617,78 @@ class SimulationRunner:
         return state
     
     @classmethod
+    def has_live_process(cls, simulation_id: str) -> bool:
+        """Return whether a simulation process is still running for this ID."""
+        process = cls._processes.get(simulation_id)
+        return process is not None and process.poll() is None
+
+    @classmethod
+    def _publish_final_status(
+        cls,
+        simulation_id: str,
+        state: SimulationRunState,
+        desired_status: RunnerStatus,
+        error_message: str | None,
+    ) -> None:
+        """Drain graph writes, then publish a final status. Caller holds the lock."""
+        state.twitter_running = False
+        state.reddit_running = False
+
+        if cls._graph_memory_enabled.get(simulation_id, False):
+            # STOPPING is a non-terminal ingestion barrier. The UI and report
+            # API must not observe COMPLETED until every accepted episode has
+            # been processed by the graph store.
+            state.runner_status = RunnerStatus.STOPPING
+            cls._save_run_state(state)
+            cls._sync_simulation_status(simulation_id, RunnerStatus.STOPPING)
+            try:
+                GraphMemoryManager.stop_updater(simulation_id)
+                cls._graph_memory_enabled.pop(simulation_id, None)
+                logger.info(
+                    "Stopped graph memory updates: simulation_id=%s",
+                    simulation_id,
+                )
+            except Exception as error:
+                logger.error(f"Failed to stop graph memory updater: {error}")
+                desired_status = RunnerStatus.FAILED
+                ingestion_error = f"graph writing did not fully complete: {error}"
+                # Keep the original failure ahead of its side effect.
+                error_message = (
+                    f"{error_message}; {ingestion_error}"
+                    if error_message
+                    else ingestion_error
+                )
+
+        state.runner_status = desired_status
+        state.error = error_message
+        state.completed_at = datetime.now().isoformat()
+        cls._save_run_state(state)
+        cls._sync_simulation_status(simulation_id, desired_status, error_message)
+        if desired_status == RunnerStatus.COMPLETED:
+            logger.info(f"Simulation completed: {simulation_id}")
+        else:
+            logger.error(f"Simulation failed: {simulation_id}, error={state.error}")
+
+    @classmethod
+    def _publish_rounds_finished(cls, simulation_id: str) -> None:
+        """Mark a run complete after its last round, leaving the process alive.
+
+        The process stays up to answer interviews, including the report's, and
+        exits only when its environment is closed or the run is stopped.
+        """
+        with cls._finalization_lock(simulation_id):
+            state = cls.get_run_state(simulation_id)
+            if (
+                state is None
+                or state.runner_status != RunnerStatus.RUNNING
+                or simulation_id in cls._manual_stop_requests
+            ):
+                return
+            cls._publish_final_status(
+                simulation_id, state, RunnerStatus.COMPLETED, None
+            )
+
+    @classmethod
     def _monitor_simulation(cls, simulation_id: str, locale: str = 'en'):
         """Monitor the simulation process and parse action logs"""
         set_locale(locale)
@@ -637,6 +709,7 @@ class SimulationRunner:
         
         monitor_error: Exception | None = None
         exit_code: int | None = None
+        rounds_finished_published = False
         try:
             while process.poll() is None:  # Process still running
                 # Read Twitter action log
@@ -653,6 +726,15 @@ class SimulationRunner:
                 
                 # Update state
                 cls._save_run_state(state)
+
+                if (
+                    not rounds_finished_published
+                    and cls._check_all_platforms_completed(state)
+                ):
+                    rounds_finished_published = True
+                    cls._publish_rounds_finished(simulation_id)
+                    state = cls.get_run_state(simulation_id) or state
+
                 time.sleep(2)
             
             # After the process ends, read the logs one last time
@@ -679,6 +761,7 @@ class SimulationRunner:
                 if state.runner_status not in {
                     RunnerStatus.STOPPED,
                     RunnerStatus.FAILED,
+                    RunnerStatus.COMPLETED,
                 }:
                     manual_stop = simulation_id in cls._manual_stop_requests
                     desired_status = (
@@ -709,50 +792,9 @@ class SimulationRunner:
                                 f"it ran out of memory (exit code {exit_code})"
                             )
 
-                    state.twitter_running = False
-                    state.reddit_running = False
-
-                    if cls._graph_memory_enabled.get(simulation_id, False):
-                        # STOPPING is a non-terminal ingestion barrier. The UI
-                        # and report API must not observe COMPLETED until every
-                        # accepted episode is processed by graph store.
-                        state.runner_status = RunnerStatus.STOPPING
-                        cls._save_run_state(state)
-                        cls._sync_simulation_status(
-                            simulation_id,
-                            RunnerStatus.STOPPING,
-                        )
-                        try:
-                            GraphMemoryManager.stop_updater(simulation_id)
-                            cls._graph_memory_enabled.pop(simulation_id, None)
-                            logger.info(
-                                "Stopped graph memory updates: simulation_id=%s",
-                                simulation_id,
-                            )
-                        except Exception as error:
-                            logger.error(f"Failed to stop graph memory updater: {error}")
-                            desired_status = RunnerStatus.FAILED
-                            ingestion_error = f"graph writing did not fully complete: {error}"
-                            # Keep the original failure ahead of its side effect.
-                            error_message = (
-                                f"{error_message}; {ingestion_error}"
-                                if error_message
-                                else ingestion_error
-                            )
-
-                    state.runner_status = desired_status
-                    state.error = error_message
-                    state.completed_at = datetime.now().isoformat()
-                    cls._save_run_state(state)
-                    cls._sync_simulation_status(
-                        simulation_id,
-                        desired_status,
-                        error_message,
+                    cls._publish_final_status(
+                        simulation_id, state, desired_status, error_message
                     )
-                    if desired_status == RunnerStatus.COMPLETED:
-                        logger.info(f"Simulation completed: {simulation_id}")
-                    else:
-                        logger.error(f"Simulation failed: {simulation_id}, error={state.error}")
                 cls._manual_stop_requests.discard(simulation_id)
             
             # Clean up process resources
@@ -831,10 +873,10 @@ class SimulationRunner:
                                     if all_completed:
                                         # Platform completion is only an input
                                         # signal. The monitor publishes the
-                                        # terminal status after the process has
-                                        # exited and graph store ingestion has drained.
+                                        # final status once graph store
+                                        # ingestion has drained.
                                         logger.info(
-                                            f"All platforms finished, waiting for process and graph writing to complete: "
+                                            f"All platforms finished, waiting for graph writing to complete: "
                                             f"{state.simulation_id}"
                                         )
                                 
@@ -998,6 +1040,7 @@ class SimulationRunner:
                     RunnerStatus.STOPPING,
                 ]
                 and not retrying_finalization
+                and not cls.has_live_process(simulation_id)
             ):
                 raise ValueError(
                     f"Simulation is not running: {simulation_id}, status={state.runner_status}"

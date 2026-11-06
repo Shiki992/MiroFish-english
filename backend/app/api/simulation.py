@@ -1627,12 +1627,6 @@ def start_simulation():
                 updater = GraphMemoryManager.get_updater(simulation_id)
                 needs_finalization = bool(
                     run_state
-                    and run_state.runner_status in {
-                        RunnerStatus.RUNNING,
-                        RunnerStatus.PAUSED,
-                        RunnerStatus.STOPPING,
-                        RunnerStatus.FAILED,
-                    }
                     and (
                         run_state.runner_status
                         in {
@@ -1640,7 +1634,12 @@ def start_simulation():
                             RunnerStatus.PAUSED,
                             RunnerStatus.STOPPING,
                         }
-                        or updater is not None
+                        or (
+                            run_state.runner_status == RunnerStatus.FAILED
+                            and updater is not None
+                        )
+                        # A finished run's process may still be waiting for interviews.
+                        or SimulationRunner.has_live_process(simulation_id)
                     )
                 )
                 if needs_finalization:
