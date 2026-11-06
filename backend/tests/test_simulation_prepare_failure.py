@@ -10,7 +10,7 @@ from app.services.simulation_manager import (
     SimulationState,
     SimulationStatus,
 )
-from app.services.zep_entity_reader import FilteredEntities
+from app.services.graph_entity_reader import FilteredEntities
 
 
 def _write_failed_state(root, simulation_id="sim_failed"):
@@ -70,7 +70,7 @@ def test_zero_entities_persists_failed_state_and_raises(tmp_path, monkeypatch):
             )
 
     monkeypatch.setattr(SimulationManager, "SIMULATION_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(simulation_manager_module, "ZepEntityReader", EmptyReader)
+    monkeypatch.setattr(simulation_manager_module, "GraphEntityReader", EmptyReader)
 
     manager = SimulationManager()
     state = SimulationState(
@@ -85,7 +85,7 @@ def test_zero_entities_persists_failed_state_and_raises(tmp_path, monkeypatch):
     )
     manager._save_simulation_state(state)
 
-    with pytest.raises(ValueError, match="没有找到符合条件的实体"):
+    with pytest.raises(ValueError, match="No matching entities found"):
         manager.prepare_simulation(
             simulation_id=state.simulation_id,
             simulation_requirement="requirement",
@@ -99,4 +99,4 @@ def test_zero_entities_persists_failed_state_and_raises(tmp_path, monkeypatch):
     assert persisted["profiles_generated"] is False
     assert persisted["config_generated"] is False
     assert persisted["config_reasoning"] == ""
-    assert "没有找到符合条件的实体" in persisted["error"]
+    assert "No matching entities found" in persisted["error"]

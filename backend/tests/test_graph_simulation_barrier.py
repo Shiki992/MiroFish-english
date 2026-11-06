@@ -32,7 +32,7 @@ def test_manual_stop_surfaces_graph_ingestion_failure(monkeypatch):
         classmethod(lambda _cls, value: saved.append(value.runner_status)),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "stop_updater",
         classmethod(
             lambda _cls, _simulation_id: (_ for _ in ()).throw(
@@ -107,7 +107,7 @@ def test_manual_stop_timeout_leaves_monitor_owned_state_stopping(monkeypatch):
     SimulationRunner._graph_memory_enabled.pop("sim-timeout", None)
 
     try:
-        with pytest.raises(TimeoutError, match="仍在停止中"):
+        with pytest.raises(TimeoutError, match="still stopping"):
             SimulationRunner.stop_simulation("sim-timeout")
         assert state.runner_status == RunnerStatus.STOPPING
     finally:
@@ -132,12 +132,12 @@ def test_failed_ingestion_finalization_can_be_retried(monkeypatch):
         classmethod(lambda _cls, _state: None),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: object()),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "stop_updater",
         classmethod(lambda _cls, _simulation_id: None),
     )
@@ -252,7 +252,7 @@ def test_force_restart_does_not_continue_while_old_ingestion_is_pending(monkeypa
         ),
     )
     monkeypatch.setattr(
-        simulation_api.ZepGraphMemoryManager,
+        simulation_api.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: object()),
     )
@@ -394,13 +394,13 @@ def test_shutdown_terminates_producer_before_tail_read_and_updater_drain(
         ),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "get_simulation_ids",
         classmethod(lambda _cls: [simulation_id]),
     )
     updater = object()
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: updater),
     )
@@ -449,17 +449,17 @@ def test_shutdown_drain_failure_remains_failed_and_retryable(monkeypatch):
         classmethod(lambda _cls, *_args, **_kwargs: None),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "get_simulation_ids",
         classmethod(lambda _cls: [simulation_id]),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: updater),
     )
     monkeypatch.setattr(
-        runner_module.ZepGraphMemoryManager,
+        runner_module.GraphMemoryManager,
         "stop_updater",
         classmethod(
             lambda _cls, _simulation_id: (_ for _ in ()).throw(

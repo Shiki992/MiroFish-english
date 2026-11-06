@@ -9,7 +9,7 @@ from app.api import simulation as simulation_api
 from app.models.project import ProjectStatus
 from app.services.simulation_manager import SimulationStatus
 from app.services.simulation_runner import RunnerStatus
-from app.utils.zep_lifecycle import (
+from app.utils.graph_lifecycle import (
     get_graph_readers,
     unregister_graph_reader,
 )
@@ -47,7 +47,7 @@ def test_report_generation_waits_for_zep_ingestion(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        report_api.ZepGraphMemoryManager,
+        report_api.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: object()),
     )
@@ -93,7 +93,7 @@ def test_active_rerun_does_not_return_a_stale_completed_report(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        report_api.ZepGraphMemoryManager,
+        report_api.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: object()),
     )
@@ -129,7 +129,7 @@ def test_failed_ingestion_cannot_generate_a_report_after_restart(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        report_api.ZepGraphMemoryManager,
+        report_api.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: None),
     )
@@ -221,7 +221,7 @@ def test_report_reader_lease_blocks_graph_start_and_delete(monkeypatch):
         classmethod(lambda _cls, _simulation_id: run_state),
     )
     monkeypatch.setattr(
-        report_api.ZepGraphMemoryManager,
+        report_api.GraphMemoryManager,
         "get_updater",
         classmethod(lambda _cls, _simulation_id: None),
     )
@@ -246,7 +246,7 @@ def test_report_reader_lease_blocks_graph_start_and_delete(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        graph_api.ZepGraphMemoryManager,
+        graph_api.GraphMemoryManager,
         "get_simulation_ids_for_graph",
         classmethod(lambda _cls, _graph_id: []),
     )

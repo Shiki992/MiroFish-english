@@ -1,14 +1,38 @@
 services:
   mirofish:
-    image: ghcr.io/666ghj/mirofish:latest
-    # 加速镜像（如拉取缓慢可替换上方地址）
-    # image: ghcr.nju.edu.cn/666ghj/mirofish:latest
+    image: mirofish:local
+    build: .
     container_name: mirofish
     env_file:
       - .env
+    environment:
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      HF_HOME: /app/backend/.cache/huggingface
+    depends_on:
+      falkordb:
+        condition: service_healthy
     ports:
       - "3000:3000"
       - "5001:5001"
     restart: unless-stopped
     volumes:
       - ./backend/uploads:/app/backend/uploads
+      - huggingface_cache:/app/backend/.cache/huggingface
+
+  # Knowledge graph database. It has no published port, so only the app can reach it.
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: mirofish-falkordb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+
+volumes:
+  falkordb_data:
+  huggingface_cache:

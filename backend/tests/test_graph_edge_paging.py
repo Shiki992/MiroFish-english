@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.utils import zep_paging
+from app.utils import graph_paging
 
 
 def _client():
@@ -19,7 +19,7 @@ def test_edge_cap_stops_pagination_at_requested_limit(monkeypatch):
     pages = [
         SimpleNamespace(
             data=[SimpleNamespace(uuid_="e1"), SimpleNamespace(uuid_="e2")],
-            headers={"Zep-Next-Cursor": "opaque-page-2"},
+            headers={"Graph-Next-Cursor": "opaque-page-2"},
         ),
         SimpleNamespace(
             data=[SimpleNamespace(uuid_="e3"), SimpleNamespace(uuid_="e4")],
@@ -32,9 +32,9 @@ def test_edge_cap_stops_pagination_at_requested_limit(monkeypatch):
         calls.append(kwargs)
         return pages[len(calls) - 1]
 
-    monkeypatch.setattr(zep_paging, "_fetch_page_with_retry", fake_fetch)
+    monkeypatch.setattr(graph_paging, "_fetch_page_with_retry", fake_fetch)
 
-    result = zep_paging.fetch_all_edges(_client(), "graph", page_size=2, max_items=3)
+    result = graph_paging.fetch_all_edges(_client(), "graph", page_size=2, max_items=3)
 
     assert [edge.uuid_ for edge in result] == ["e1", "e2", "e3"]
     assert len(calls) == 2
@@ -48,9 +48,9 @@ def test_existing_positional_retry_arguments_keep_their_meaning(monkeypatch):
         observed.update(kwargs)
         return SimpleNamespace(data=[], headers={})
 
-    monkeypatch.setattr(zep_paging, "_fetch_page_with_retry", fake_fetch)
+    monkeypatch.setattr(graph_paging, "_fetch_page_with_retry", fake_fetch)
 
-    zep_paging.fetch_all_edges(_client(), "graph", 25, 7, 0.25)
+    graph_paging.fetch_all_edges(_client(), "graph", 25, 7, 0.25)
 
     assert observed["limit"] == 25
     assert observed["max_retries"] == 7
@@ -66,7 +66,7 @@ def test_pagination_uses_the_current_opaque_response_cursor():
             if kwargs.get("cursor") is None:
                 return SimpleNamespace(
                     data=[SimpleNamespace(uuid_="e1"), SimpleNamespace(uuid_="e2")],
-                    headers={"Zep-Next-Cursor": "opaque-page-2"},
+                    headers={"Graph-Next-Cursor": "opaque-page-2"},
                 )
             return SimpleNamespace(
                 data=[SimpleNamespace(uuid_="e3")],
@@ -83,7 +83,7 @@ def test_pagination_uses_the_current_opaque_response_cursor():
         graph=SimpleNamespace(edge=EdgeApi())
     )
 
-    result = zep_paging.fetch_all_edges(client, "graph", page_size=2)
+    result = graph_paging.fetch_all_edges(client, "graph", page_size=2)
 
     assert [edge.uuid_ for edge in result] == ["e1", "e2", "e3"]
     assert calls == [
@@ -97,7 +97,7 @@ def test_pagination_fails_if_the_service_repeats_a_cursor():
         def get_by_graph_id(self, _graph_id, **_kwargs):
             return SimpleNamespace(
                 data=[SimpleNamespace(uuid_="e1")],
-                headers={"Zep-Next-Cursor": "same-cursor"},
+                headers={"Graph-Next-Cursor": "same-cursor"},
             )
 
     client = SimpleNamespace(
@@ -109,4 +109,4 @@ def test_pagination_fails_if_the_service_repeats_a_cursor():
     import pytest
 
     with pytest.raises(RuntimeError, match="did not advance"):
-        zep_paging.fetch_all_edges(client, "graph", page_size=1)
+        graph_paging.fetch_all_edges(client, "graph", page_size=1)

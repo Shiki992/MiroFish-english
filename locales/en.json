@@ -75,7 +75,13 @@
     "layoutGraph": "Graph",
     "layoutSplit": "Split",
     "layoutWorkbench": "Workbench",
-    "stepNames": ["Graph Build", "Env Setup", "Run Simulation", "Report Generation", "Deep Interaction"]
+    "stepNames": [
+      "Graph Build",
+      "Env Setup",
+      "Run Simulation",
+      "Report Generation",
+      "Deep Interaction"
+    ]
   },
   "step1": {
     "ontologyGeneration": "Ontology Generation",
@@ -85,7 +91,7 @@
     "ontologyDesc": "LLM analyzes document content and simulation requirements, extracts reality seeds, and auto-generates a suitable ontology structure",
     "analyzingDocs": "Analyzing documents...",
     "graphRagBuild": "GraphRAG Build",
-    "graphRagDesc": "Based on the generated ontology, documents are auto-chunked and sent to Zep to build a knowledge graph, extracting entities and relations, forming temporal memory and community summaries",
+    "graphRagDesc": "Based on the generated ontology, documents are auto-chunked and sent to Graphiti to build a knowledge graph, extracting entities and relations, forming temporal memory and community summaries",
     "entityNodes": "Entity Nodes",
     "relationEdges": "Relation Edges",
     "schemaTypes": "Schema Types",
@@ -205,7 +211,8 @@
     "forceStopSuccess": "Simulation force stopped",
     "forceStopFailed": "Force stop failed: {error}",
     "startGenerateReportBtn": "Generate Report",
-    "generatingReportBtn": "Starting..."
+    "generatingReportBtn": "Starting...",
+    "startFailedGeneric": "Failed to start"
   },
   "step4": {
     "generatingSection": "Generating {title}...",
@@ -247,7 +254,9 @@
     "panelRelatedEdges": "Related Edges",
     "panelRelatedNodes": "Related Nodes",
     "world1": "World 1",
-    "world2": "World 2"
+    "world2": "World 2",
+    "selectionReason": "Selection reason",
+    "waitingToStart": "Waiting to start"
   },
   "step5": {
     "interactiveTools": "Interactive Tools",
@@ -256,6 +265,8 @@
     "chatWithAgent": "Chat with any individual in the world",
     "selectChatTarget": "Select chat target",
     "sendSurvey": "Send survey to the world",
+    "exportInterviews": "Export interviews",
+    "exportAllInterviews": "Export all simulations",
     "reportAgentChat": "Report Agent - Chat",
     "reportAgentDesc": "A conversational version of the report generation agent with access to 4 professional tools and MiroFish's complete memory",
     "toolInsightForge": "InsightForge Deep Attribution",
@@ -282,9 +293,16 @@
     "errorOccurred": "Sorry, an error occurred: {error}",
     "noResponse": "No response",
     "requestFailed": "Request failed",
-    "selectAgentFirst": "Please select a simulated individual first"
+    "selectAgentFirst": "Please select a simulated individual first",
+    "historyAsker": "Asker",
+    "historyYou": "You",
+    "historyPrompt": "Here is our conversation so far:\n{history}\n\nMy new question is: {message}"
   },
   "graph": {
+    "exportJson": "Export JSON",
+    "exportGraphml": "Export GraphML",
+    "exportJsonHint": "Download all nodes and edges as JSON",
+    "exportGraphmlHint": "Download for graph tools such as Gephi, yEd or Cytoscape",
     "panelTitle": "Graph Relationship Visualization",
     "refreshGraph": "Refresh Graph",
     "graphMemoryRealtime": "GraphRAG short/long-term memory updating in real-time",
@@ -328,7 +346,7 @@
     "noDocProcessed": "No documents were processed successfully. Please check file formats.",
     "requireProjectId": "Please provide project_id",
     "configError": "Configuration error: {details}",
-    "zepApiKeyMissing": "ZEP_API_KEY not configured",
+    "graphStoreMissing": "GRAPH_STORE_URL not configured",
     "ontologyNotGenerated": "Ontology not yet generated. Please call /ontology/generate first.",
     "graphBuilding": "Graph build in progress. Do not resubmit. To force rebuild, add force: true.",
     "textNotFound": "Extracted text content not found",
@@ -393,10 +411,10 @@
   "progress": {
     "initGraphService": "Initializing graph build service...",
     "textChunking": "Chunking text...",
-    "creatingZepGraph": "Creating Zep graph...",
+    "creatingGraph": "Creating Graphiti graph...",
     "settingOntology": "Setting ontology definition...",
     "addingChunks": "Adding {count} text chunks...",
-    "waitingZepProcess": "Waiting for Zep to process data...",
+    "waitingGraphProcess": "Waiting for Graphiti to process data...",
     "fetchingGraphData": "Fetching graph data...",
     "graphBuildComplete": "Graph build complete",
     "buildFailed": "Build failed: {error}",
@@ -410,12 +428,12 @@
     "noEpisodesWait": "No episodes to wait for",
     "waitingEpisodes": "Waiting for {count} text chunks to process...",
     "episodesTimeout": "Some chunks timed out, {completed}/{total} completed",
-    "zepProcessing": "Zep processing... {completed}/{total} done, {pending} pending ({elapsed}s)",
+    "graphProcessing": "Graphiti processing... {completed}/{total} done, {pending} pending ({elapsed}s)",
     "processingComplete": "Processing complete: {completed}/{total}",
     "taskComplete": "Task complete",
     "taskFailed": "Task failed",
     "startPreparingEnv": "Preparing simulation environment...",
-    "connectingZepGraph": "Connecting to Zep graph...",
+    "connectingGraph": "Connecting to Graphiti graph...",
     "readingNodeData": "Reading node data...",
     "readingComplete": "Done, {count} entities found",
     "startGenerating": "Starting generation...",
@@ -441,7 +459,7 @@
     "generatingEventConfig": "Generating event config and hot topics...",
     "generatingAgentConfig": "Generating agent config ({start}-{end}/{total})...",
     "generatingPlatformConfig": "Generating platform config...",
-    "zepSearchQuery": "All information, activities, events, relationships and background about {name}",
+    "graphSearchQuery": "All information, activities, events, relationships and background about {name}",
     "timeConfigLabel": "Time Config",
     "eventConfigLabel": "Event Config",
     "agentConfigResult": "Agent Config: {count} generated",
@@ -492,7 +510,7 @@
     "detectedExistingPrep": "Detected existing preparation, using it directly",
     "prepareTaskStarted": "Preparation task started",
     "prepareTaskId": "  └─ Task ID: {taskId}",
-    "zepEntitiesFound": "Found {count} entities from Zep graph",
+    "graphEntitiesFound": "Found {count} entities from Graphiti graph",
     "entityTypes": "  └─ Entity types: {types}",
     "startPollingProgress": "Polling preparation progress...",
     "prepareFailed": "Preparation failed: {error}",
@@ -612,13 +630,13 @@
     "redirectToInsightForge": "get_simulation_context redirected to insight_forge"
   },
   "console": {
-    "zepToolsInitialized": "ZepToolsService initialized",
-    "zepRetryAttempt": "Zep {operation} attempt {attempt} failed: {error}, retrying in {delay}s...",
-    "zepAllRetriesFailed": "Zep {operation} failed after {retries} attempts: {error}",
+    "graphToolsInitialized": "GraphToolsService initialized",
+    "graphRetryAttempt": "Graphiti {operation} attempt {attempt} failed: {error}, retrying in {delay}s...",
+    "graphAllRetriesFailed": "Graphiti {operation} failed after {retries} attempts: {error}",
     "graphSearch": "Graph search: graph_id={graphId}, query={query}...",
     "graphSearchOp": "Graph search (graph={graphId})",
     "searchComplete": "Search complete: found {count} relevant facts",
-    "zepSearchApiFallback": "Zep Search API failed, falling back to local search: {error}",
+    "graphSearchApiFallback": "Graphiti Search API failed, falling back to local search: {error}",
     "usingLocalSearch": "Using local search: query={query}...",
     "localSearchComplete": "Local search complete: found {count} relevant facts",
     "localSearchFailed": "Local search failed: {error}",

@@ -1,4 +1,4 @@
-"""Process-local lifecycle coordination for Zep Cloud graphs.
+"""Process-local lifecycle coordination for graph store graphs.
 
 The lock is intentionally keyed by graph ID so graph deletion/reset and a new
 simulation updater claim cannot pass each other between validation and their

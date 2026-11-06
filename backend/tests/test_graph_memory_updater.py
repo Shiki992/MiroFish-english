@@ -4,11 +4,11 @@ from queue import Queue
 
 import pytest
 
-from app.services import zep_graph_memory_updater as updater_module
-from app.services.zep_graph_memory_updater import (
+from app.services import graph_memory_updater as updater_module
+from app.services.graph_memory_updater import (
     AgentActivity,
-    ZepGraphMemoryManager,
-    ZepGraphMemoryUpdater,
+    GraphMemoryManager,
+    GraphMemoryUpdater,
 )
 
 
@@ -37,8 +37,8 @@ def _client(add):
 
 def _updater(monkeypatch, add, simulation_id="sim-1"):
     client = _client(add)
-    monkeypatch.setattr(updater_module, "get_zep_client", lambda _key: client)
-    updater = ZepGraphMemoryUpdater(
+    monkeypatch.setattr(updater_module, "get_graph_client", lambda _key: client)
+    updater = GraphMemoryUpdater(
         "graph-1",
         api_key="test-key",
         simulation_id=simulation_id,
@@ -187,7 +187,7 @@ def test_pending_episode_wait_has_a_deadline(monkeypatch):
         processed=False
     )
     timestamps = iter([0.0, 2.0])
-    monkeypatch.setattr(updater_module, "ZEP_INGESTION_WAIT_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(updater_module, "GRAPH_INGESTION_WAIT_TIMEOUT_SECONDS", 1)
     monkeypatch.setattr(updater_module.time, "time", lambda: next(timestamps))
     monkeypatch.setattr(updater_module.time, "sleep", lambda _seconds: None)
 
@@ -201,12 +201,12 @@ def test_explicit_graph_destruction_can_discard_a_stopped_failed_updater():
         _running=False,
         _worker_thread=SimpleNamespace(is_alive=lambda: False),
     )
-    ZepGraphMemoryManager._updaters["sim-failed"] = updater
+    GraphMemoryManager._updaters["sim-failed"] = updater
     try:
-        assert ZepGraphMemoryManager.discard_inactive_updater("sim-failed") is True
-        assert "sim-failed" not in ZepGraphMemoryManager._updaters
+        assert GraphMemoryManager.discard_inactive_updater("sim-failed") is True
+        assert "sim-failed" not in GraphMemoryManager._updaters
     finally:
-        ZepGraphMemoryManager._updaters.pop("sim-failed", None)
+        GraphMemoryManager._updaters.pop("sim-failed", None)
 
 
 def test_flush_deadline_keeps_unattempted_platform_for_a_safe_retry(monkeypatch):

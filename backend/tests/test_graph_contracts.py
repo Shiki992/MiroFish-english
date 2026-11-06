@@ -3,14 +3,13 @@ import json
 
 import httpx
 import pytest
-from zep_cloud import Zep
-from zep_cloud.core.api_error import ApiError as ZepApiError
+from app.utils.graph_client import GraphApiError
 
 from app.services import graph_builder as graph_builder_module
 from app.services.graph_builder import BatchSubmission, GraphBuilderService
 from app.services.oasis_profile_generator import OasisProfileGenerator
-from app.services.zep_entity_reader import EntityNode, ZepEntityReader
-from app.services.zep_tools import ZepToolsService
+from app.services.graph_entity_reader import EntityNode, GraphEntityReader
+from app.services.graph_tools import GraphToolsService
 
 
 def test_report_search_caps_the_query_sent_to_zep():
@@ -21,7 +20,7 @@ def test_report_search_caps_the_query_sent_to_zep():
             calls.append(kwargs)
             return SimpleNamespace(edges=[], nodes=[])
 
-    service = object.__new__(ZepToolsService)
+    service = object.__new__(GraphToolsService)
     service.client = SimpleNamespace(graph=GraphApi())
 
     original_query = "q" * 401
@@ -40,7 +39,7 @@ def test_profile_context_search_caps_both_queries_sent_to_zep():
             return SimpleNamespace(edges=[], nodes=[])
 
     generator = object.__new__(OasisProfileGenerator)
-    generator.zep_client = SimpleNamespace(graph=GraphApi())
+    generator.graph_client = SimpleNamespace(graph=GraphApi())
     generator.graph_id = "graph-id"
 
     entity = EntityNode(
@@ -82,7 +81,7 @@ def test_entity_context_includes_incoming_edges_from_the_full_graph():
         "attributes": {},
     }
 
-    reader = object.__new__(ZepEntityReader)
+    reader = object.__new__(GraphEntityReader)
     reader.client = SimpleNamespace(
         graph=SimpleNamespace(
             node=SimpleNamespace(
@@ -122,14 +121,14 @@ def test_entity_context_includes_incoming_edges_from_the_full_graph():
 
 def test_entity_reader_does_not_turn_auth_failure_into_missing_entity():
     def unauthorized(**_kwargs):
-        raise ZepApiError(status_code=401, body={"message": "unauthorized"})
+        raise GraphApiError(status_code=401, body={"message": "unauthorized"})
 
-    reader = object.__new__(ZepEntityReader)
+    reader = object.__new__(GraphEntityReader)
     reader.client = SimpleNamespace(
         graph=SimpleNamespace(node=SimpleNamespace(get=unauthorized))
     )
 
-    with pytest.raises(ZepApiError) as error:
+    with pytest.raises(GraphApiError) as error:
         reader.get_entity_with_context("graph-id", "node-id")
 
     assert error.value.status_code == 401
@@ -137,16 +136,16 @@ def test_entity_reader_does_not_turn_auth_failure_into_missing_entity():
 
 def test_entity_reader_does_not_turn_edge_failure_into_empty_data():
     def forbidden(**_kwargs):
-        raise ZepApiError(status_code=403, body={"message": "forbidden"})
+        raise GraphApiError(status_code=403, body={"message": "forbidden"})
 
-    reader = object.__new__(ZepEntityReader)
+    reader = object.__new__(GraphEntityReader)
     reader.client = SimpleNamespace(
         graph=SimpleNamespace(
             node=SimpleNamespace(get_edges=forbidden),
         )
     )
 
-    with pytest.raises(ZepApiError) as error:
+    with pytest.raises(GraphApiError) as error:
         reader.get_node_edges("node-id")
 
     assert error.value.status_code == 403
@@ -154,20 +153,20 @@ def test_entity_reader_does_not_turn_edge_failure_into_empty_data():
 
 def test_report_tools_do_not_turn_zep_read_failures_into_empty_data():
     def unauthorized(**_kwargs):
-        raise ZepApiError(status_code=401, body={"message": "unauthorized"})
+        raise GraphApiError(status_code=401, body={"message": "unauthorized"})
 
-    service = object.__new__(ZepToolsService)
+    service = object.__new__(GraphToolsService)
     service.client = SimpleNamespace(
         graph=SimpleNamespace(node=SimpleNamespace(get=unauthorized))
     )
 
-    with pytest.raises(ZepApiError):
+    with pytest.raises(GraphApiError):
         service.get_node_detail("node-id")
 
     service.get_all_edges = lambda _graph_id: (_ for _ in ()).throw(
-        ZepApiError(status_code=503, body={"message": "unavailable"})
+        GraphApiError(status_code=503, body={"message": "unavailable"})
     )
-    with pytest.raises(ZepApiError):
+    with pytest.raises(GraphApiError):
         service.get_node_edges("graph-id", "node-id")
 
 
@@ -433,69 +432,3 @@ def test_batch_wait_times_out_while_status_remains_nonterminal(monkeypatch):
         )
 
 
-def test_installed_sdk_serializes_the_batch_325_contract():
-    requests = []
-
-    def handler(request):
-        requests.append((request.method, request.url.path, request.content))
-        path = request.url.path
-        if path.endswith("/batches") and request.method == "POST":
-            return httpx.Response(
-                200,
-                json={"batch_id": "batch-1", "status": "draft", "item_count": 0},
-            )
-        if path.endswith("/batches/batch-1/items") and request.method == "POST":
-            return httpx.Response(200, json=[{
-                "item_id": "item-1",
-                "sequence_index": 0,
-                "status": "pending",
-                "episode_uuid": "episode-1",
-                "source_uuid": "episode-1",
-            }])
-        if path.endswith("/batches/batch-1/process"):
-            return httpx.Response(
-                200,
-                json={"batch_id": "batch-1", "status": "queued", "item_count": 1},
-            )
-        if path.endswith("/batches/batch-1"):
-            return httpx.Response(200, json={
-                "batch_id": "batch-1",
-                "status": "succeeded",
-                "item_count": 1,
-                "progress": {"percent_complete": 100, "succeeded_items": 1},
-            })
-        if path.endswith("/batches/batch-1/items") and request.method == "GET":
-            return httpx.Response(200, json={
-                "items": [{
-                    "item_id": "item-1",
-                    "sequence_index": 0,
-                    "status": "succeeded",
-                    "episode_uuid": "episode-1",
-                    "source_uuid": "episode-1",
-                }],
-                "next_cursor": None,
-            })
-        raise AssertionError(f"Unexpected request: {request.method} {path}")
-
-    with httpx.Client(transport=httpx.MockTransport(handler)) as transport_client:
-        builder = object.__new__(GraphBuilderService)
-        builder.client = Zep(api_key="test-key", httpx_client=transport_client)
-        submission = builder.add_text_batches("graph-id", ["source chunk"])
-        assert builder._wait_for_batch(submission, timeout=1) == ["episode-1"]
-
-    assert [(method, path) for method, path, _body in requests] == [
-        ("POST", "/api/v2/batches"),
-        ("POST", "/api/v2/batches/batch-1/items"),
-        ("POST", "/api/v2/batches/batch-1/process"),
-        ("GET", "/api/v2/batches/batch-1"),
-        ("GET", "/api/v2/batches/batch-1/items"),
-    ]
-    add_payload = json.loads(requests[1][2])
-    assert add_payload["items"][0] == {
-        "data": "source chunk",
-        "data_type": "text",
-        "graph_id": "graph-id",
-        "metadata": add_payload["items"][0]["metadata"],
-        "source_description": "MiroFish source document chunk",
-        "type": "graph_episode",
-    }

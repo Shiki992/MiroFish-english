@@ -14,6 +14,17 @@ RESERVED_ONTOLOGY_ATTRIBUTE_NAMES = frozenset({
     "name_embedding",
     "summary",
     "created_at",
+    "labels",
+    "attributes",
+    "fact",
+    "fact_embedding",
+    "episodes",
+    "expired_at",
+    "valid_at",
+    "invalid_at",
+    "reference_time",
+    "source_node_uuid",
+    "target_node_uuid",
 })
 
 _FALLBACK_ATTRIBUTE = {
@@ -50,7 +61,7 @@ def normalize_ontology_attribute(attribute: Any) -> Optional[Dict[str, Any]]:
 
 
 def normalize_ontology_attributes(attributes: Any) -> List[Dict[str, Any]]:
-    """Return a non-empty Zep-compatible attribute list within service limits."""
+    """Return a non-empty graph store-compatible attribute list within service limits."""
 
     if not isinstance(attributes, list):
         attributes = []
@@ -75,7 +86,7 @@ def normalize_ontology_source_targets(
     *,
     limit: int | None = MAX_ONTOLOGY_SOURCE_TARGETS,
 ) -> List[Dict[str, str]]:
-    """Return unique, structurally valid source-target pairs within Zep limits."""
+    """Return unique, structurally valid source-target pairs within graph store limits."""
 
     if not isinstance(source_targets, list):
         return []

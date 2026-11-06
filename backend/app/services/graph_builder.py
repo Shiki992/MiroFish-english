@@ -1,6 +1,6 @@
 """
-图谱构建服务
-接口2：使用Zep API构建Standalone Graph
+Graph building service
+Interface 2: Build a Standalone Graph using the graph API
 """
 
 import hashlib
@@ -10,22 +10,22 @@ import threading
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 
-from zep_cloud import BatchAddItem, EntityEdgeSourceTarget, NotFoundError
 
 from ..config import Config
 from ..models.task import TaskManager, TaskStatus
-from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+from ..utils.graph_paging import fetch_all_nodes, fetch_all_edges
 from ..utils.ontology import (
     MAX_ONTOLOGY_TYPES,
     RESERVED_ONTOLOGY_ATTRIBUTE_NAMES,
     normalize_ontology_attributes,
     normalize_ontology_source_targets,
 )
-from ..utils.zep import (
-    ZEP_INGESTION_WAIT_TIMEOUT_SECONDS,
-    call_zep_read_with_retry,
-    get_zep_client,
-    is_retryable_zep_error,
+from ..utils.graph_client import BatchAddItem, NotFoundError
+from ..utils.graph_access import (
+    GRAPH_INGESTION_WAIT_TIMEOUT_SECONDS,
+    call_graph_read_with_retry,
+    get_graph_client,
+    is_retryable_graph_error,
 )
 from .text_processor import TextProcessor
 from ..utils.locale import t, get_locale, set_locale
@@ -33,7 +33,7 @@ from ..utils.locale import t, get_locale, set_locale
 
 @dataclass
 class GraphInfo:
-    """图谱信息"""
+    """Graph info"""
     graph_id: str
     node_count: int
     edge_count: int
@@ -50,7 +50,7 @@ class GraphInfo:
 
 @dataclass(frozen=True)
 class BatchSubmission:
-    """Durable identity for one Zep Batch API ingestion operation."""
+    """Durable identity for one batch API ingestion operation."""
 
     batch_id: str
     operation_id: str
@@ -60,16 +60,16 @@ class BatchSubmission:
 
 class GraphBuilderService:
     """
-    图谱构建服务
-    负责调用Zep API构建知识图谱
+    Graph building service
+    Responsible for calling the graph API to build knowledge graphs
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or Config.ZEP_API_KEY
+        self.api_key = api_key or Config.GRAPH_STORE_URL
         if not self.api_key:
-            raise ValueError("ZEP_API_KEY 未配置")
+            raise ValueError("GRAPH_STORE_URL is not configured")
         
-        self.client = get_zep_client(self.api_key)
+        self.client = get_graph_client(self.api_key)
         self.task_manager = TaskManager()
     
     def build_graph_async(
@@ -82,20 +82,20 @@ class GraphBuilderService:
         batch_size: int = 350
     ) -> str:
         """
-        异步构建图谱
+        Build a graph asynchronously
         
         Args:
-            text: 输入文本
-            ontology: 本体定义（来自接口1的输出）
-            graph_name: 图谱名称
-            chunk_size: 文本块大小
-            chunk_overlap: 块重叠大小
-            batch_size: 每批发送的块数量
+            text: Input text
+            ontology: Ontology definition (output of interface 1)
+            graph_name: Graph name
+            chunk_size: Text chunk size
+            chunk_overlap: Chunk overlap size
+            batch_size: Number of chunks sent per batch
             
         Returns:
-            任务ID
+            Task ID
         """
-        # 创建任务
+        # Create task
         task_id = self.task_manager.create_task(
             task_type="graph_build",
             metadata={
@@ -108,7 +108,7 @@ class GraphBuilderService:
         # Capture locale before spawning background thread
         current_locale = get_locale()
 
-        # 在后台线程中执行构建
+        # Run the build in a background thread
         thread = threading.Thread(
             target=self._build_graph_worker,
             args=(task_id, text, ontology, graph_name, chunk_size, chunk_overlap, batch_size, current_locale)
@@ -127,9 +127,9 @@ class GraphBuilderService:
         chunk_size: int,
         chunk_overlap: int,
         batch_size: int,
-        locale: str = 'zh'
+        locale: str = 'en'
     ):
-        """图谱构建工作线程"""
+        """Graph building worker thread"""
         set_locale(locale)
         try:
             self.task_manager.update_task(
@@ -145,7 +145,7 @@ class GraphBuilderService:
             self.validate_batch_chunks(chunks, batch_size=batch_size)
             total_chunks = len(chunks)
 
-            # 1. 创建图谱
+            # 1. Create graph
             graph_id = self.create_graph(graph_name)
             self.task_manager.update_task(
                 task_id,
@@ -153,7 +153,7 @@ class GraphBuilderService:
                 message=t('progress.graphCreated', graphId=graph_id)
             )
             
-            # 2. 设置本体
+            # 2. Set ontology
             self.set_ontology(graph_id, ontology)
             self.task_manager.update_task(
                 task_id,
@@ -161,14 +161,14 @@ class GraphBuilderService:
                 message=t('progress.ontologySet')
             )
             
-            # 3. 文本分块已在 Cloud mutation 前完成并验证
+            # 3. Text chunking was completed and validated before the Cloud mutation
             self.task_manager.update_task(
                 task_id,
                 progress=20,
                 message=t('progress.textSplit', count=total_chunks)
             )
             
-            # 4. 分批发送数据
+            # 4. Send data in batches
             submission = self.add_text_batches(
                 graph_id, chunks, batch_size,
                 lambda msg, prog: self.task_manager.update_task(
@@ -178,11 +178,11 @@ class GraphBuilderService:
                 )
             )
             
-            # 5. 等待Zep处理完成
+            # 5. Wait for graph store processing to finish
             self.task_manager.update_task(
                 task_id,
                 progress=60,
-                message=t('progress.waitingZepProcess')
+                message=t('progress.waitingGraphProcess')
             )
             
             self._wait_for_batch(
@@ -194,7 +194,7 @@ class GraphBuilderService:
                 )
             )
             
-            # 6. 获取图谱信息
+            # 6. Get graph info
             self.task_manager.update_task(
                 task_id,
                 progress=90,
@@ -203,7 +203,7 @@ class GraphBuilderService:
             
             graph_info = self._get_graph_info(graph_id)
             
-            # 完成
+            # Done
             self.task_manager.complete_task(task_id, {
                 "graph_id": graph_id,
                 "graph_info": graph_info.to_dict(),
@@ -237,12 +237,12 @@ class GraphBuilderService:
                 description="MiroFish Social Simulation Graph"
             )
         except Exception as error:
-            if not is_retryable_zep_error(error):
+            if not is_retryable_graph_error(error):
                 raise
             reconciliation_error = None
             for attempt in range(3):
                 try:
-                    call_zep_read_with_retry(
+                    call_graph_read_with_retry(
                         lambda: self.client.graph.get(graph_id),
                         operation_name=f"reconcile graph create {graph_id}",
                     )
@@ -281,7 +281,7 @@ class GraphBuilderService:
             cursor: int | None = None
             seen_cursors: set[int] = set()
             while True:
-                page = call_zep_read_with_retry(
+                page = call_graph_read_with_retry(
                     lambda: self.client.batch.list(limit=100, cursor=cursor),
                     operation_name=f"reconcile batch create {operation_id}",
                 )
@@ -296,13 +296,13 @@ class GraphBuilderService:
                 if next_cursor is None:
                     break
                 if next_cursor == cursor or next_cursor in seen_cursors:
-                    raise RuntimeError("Zep batch list cursor did not advance")
+                    raise RuntimeError("Graph batch list cursor did not advance")
                 seen_cursors.add(next_cursor)
                 cursor = next_cursor
 
             if len(matches) > 1:
                 raise RuntimeError(
-                    f"Multiple Zep batches match operation {operation_id}; refusing ambiguity"
+                    f"Multiple graph batches match operation {operation_id}; refusing ambiguity"
                 )
             if matches:
                 return matches[0]
@@ -311,99 +311,57 @@ class GraphBuilderService:
         return None
     
     def set_ontology(self, graph_id: str, ontology: Dict[str, Any]):
-        """设置图谱本体（公开方法）"""
-        import warnings
-        from typing import Optional
-        from pydantic import Field
-        from zep_cloud.external_clients.ontology import EntityModel, EntityText, EdgeModel
-        
-        # 抑制 Pydantic v2 关于 Field(default=None) 的警告
-        # 这是 Zep SDK 要求的用法，警告来自动态类创建，可以安全忽略
-        warnings.filterwarnings('ignore', category=UserWarning, module='pydantic')
-        
-        def safe_attr_name(attr_name: str) -> str:
-            """将保留名称转换为安全名称"""
-            if attr_name.lower() in RESERVED_ONTOLOGY_ATTRIBUTE_NAMES:
-                return f"entity_{attr_name}"
-            return attr_name
-        
-        # 动态创建实体类型
-        entity_types = {}
-        for entity_def in ontology.get("entity_types", [])[:MAX_ONTOLOGY_TYPES]:
-            name = entity_def["name"]
-            description = entity_def.get("description", f"A {name} entity.")
-            
-            # 创建属性字典和类型注解（Pydantic v2 需要）
-            attrs = {"__doc__": description}
-            annotations = {}
-            
-            for normalized in normalize_ontology_attributes(
-                entity_def.get("attributes", [])
+        """Normalize an ontology and store it for this graph's ingestion."""
+
+        def normalized_attributes(definition: Dict[str, Any]) -> List[Dict[str, Any]]:
+            attributes = []
+            for attribute in normalize_ontology_attributes(
+                definition.get("attributes", [])
             ):
-                attr_name = safe_attr_name(normalized["name"])  # 使用安全名称
-                attr_desc = normalized["description"]
-                # Zep API 需要 Field 的 description，这是必需的
-                attrs[attr_name] = Field(description=attr_desc, default=None)
-                annotations[attr_name] = Optional[EntityText]  # 类型注解
-            
-            attrs["__annotations__"] = annotations
-            
-            # 动态创建类
-            entity_class = type(name, (EntityModel,), attrs)
-            entity_class.__doc__ = description
-            entity_types[name] = entity_class
-        
-        # 动态创建边类型
-        edge_definitions = {}
-        for edge_def in ontology.get("edge_types", [])[:MAX_ONTOLOGY_TYPES]:
-            name = edge_def["name"]
-            description = edge_def.get("description", f"A {name} relationship.")
-            
-            # 创建属性字典和类型注解
-            attrs = {"__doc__": description}
-            annotations = {}
-            
-            for normalized in normalize_ontology_attributes(
-                edge_def.get("attributes", [])
-            ):
-                attr_name = safe_attr_name(normalized["name"])  # 使用安全名称
-                attr_desc = normalized["description"]
-                # Zep API 需要 Field 的 description，这是必需的
-                attrs[attr_name] = Field(description=attr_desc, default=None)
-                annotations[attr_name] = Optional[str]  # 边属性用str类型
-            
-            attrs["__annotations__"] = annotations
-            
-            # 动态创建类
-            class_name = ''.join(word.capitalize() for word in name.split('_'))
-            edge_class = type(class_name, (EdgeModel,), attrs)
-            edge_class.__doc__ = description
-            
-            # 构建source_targets
-            source_targets = []
-            for st in normalize_ontology_source_targets(
-                edge_def.get("source_targets", [])
-            ):
-                source_targets.append(
-                    EntityEdgeSourceTarget(
-                        source=st.get("source", "Entity"),
-                        target=st.get("target", "Entity")
-                    )
+                name = attribute["name"]
+                if name.lower() in RESERVED_ONTOLOGY_ATTRIBUTE_NAMES:
+                    name = f"entity_{name}"
+                attributes.append({**attribute, "name": name})
+            return attributes
+
+        entity_types = [
+            {
+                "name": definition["name"],
+                "description": definition.get(
+                    "description", f"A {definition['name']} entity."
+                ),
+                "attributes": normalized_attributes(definition),
+            }
+            for definition in ontology.get("entity_types", [])[:MAX_ONTOLOGY_TYPES]
+        ]
+
+        edge_types = []
+        for definition in ontology.get("edge_types", [])[:MAX_ONTOLOGY_TYPES]:
+            source_targets = [
+                {
+                    "source": pair.get("source", "Entity"),
+                    "target": pair.get("target", "Entity"),
+                }
+                for pair in normalize_ontology_source_targets(
+                    definition.get("source_targets", [])
                 )
-            
+            ]
             if source_targets:
-                edge_definitions[name] = (edge_class, source_targets)
-        
-        # 调用Zep API设置本体
-        if entity_types or edge_definitions:
+                edge_types.append({
+                    "name": definition["name"],
+                    "description": definition.get(
+                        "description", f"A {definition['name']} relationship."
+                    ),
+                    "attributes": normalized_attributes(definition),
+                    "source_targets": source_targets,
+                })
+
+        if entity_types or edge_types:
             self.client.graph.set_ontology(
                 graph_ids=[graph_id],
-                # Zep iterates entities.items(), so edge-only ontologies must
-                # pass an empty dictionary rather than None.
-                entities=entity_types,
-                edges=edge_definitions if edge_definitions else None,
+                ontology={"entity_types": entity_types, "edge_types": edge_types},
             )
-    
+
     def add_text_batches(
         self,
         graph_id: str,
@@ -412,7 +370,7 @@ class GraphBuilderService:
         progress_callback: Optional[Callable] = None,
         batch_created_callback: Optional[Callable[[str | None, str], None]] = None,
     ) -> BatchSubmission:
-        """Submit document chunks through Zep's current Batch API.
+        """Submit document chunks through the batch API.
 
         Mutating calls are deliberately not retried: create/add are not
         documented as idempotent, and an ambiguous replay can duplicate graph
@@ -441,16 +399,16 @@ class GraphBuilderService:
                 }
             )
         except Exception as error:
-            if not is_retryable_zep_error(error):
+            if not is_retryable_graph_error(error):
                 raise
             batch = self._find_batch_by_operation_id(graph_id, operation_id)
             if batch is None:
                 raise RuntimeError(
-                    "Zep batch creation is unconfirmed and no matching operation was found"
+                    "Graph batch creation is unconfirmed and no matching operation was found"
                 ) from error
         batch_id = getattr(batch, "batch_id", None)
         if not batch_id:
-            raise RuntimeError("Zep Batch API returned no batch_id")
+            raise RuntimeError("batch API returned no batch_id")
         if batch_created_callback:
             batch_created_callback(batch_id, operation_id)
 
@@ -494,7 +452,7 @@ class GraphBuilderService:
             except Exception as e:
                 if progress_callback:
                     progress_callback(t('progress.batchFailed', batch=batch_num, error=str(e)), 0)
-                if is_retryable_zep_error(e):
+                if is_retryable_graph_error(e):
                     recovered_items = self._reconcile_batch_item_count(
                         batch_id,
                         expected_item_count,
@@ -510,12 +468,12 @@ class GraphBuilderService:
                         item_details = recovered_items[i:expected_item_count]
                     else:
                         raise RuntimeError(
-                            f"Zep batch {batch_id} item submission is unconfirmed; "
+                            f"Graph batch {batch_id} item submission is unconfirmed; "
                             "the draft was not processed or replayed"
                         ) from e
                 else:
                     raise RuntimeError(
-                        f"Zep batch {batch_id} item submission failed"
+                        f"Graph batch {batch_id} item submission failed"
                     ) from e
 
             if len(item_details or []) != len(items):
@@ -534,7 +492,7 @@ class GraphBuilderService:
                     item_details = recovered_items[i:expected_item_count]
                 else:
                     raise RuntimeError(
-                        f"Zep batch {batch_id} acknowledged {len(item_details or [])} "
+                        f"Graph batch {batch_id} acknowledged {len(item_details or [])} "
                         f"of {len(items)} items"
                     )
             for item in item_details:
@@ -547,13 +505,13 @@ class GraphBuilderService:
         except Exception as error:
             # A process response can be lost after the server accepted it.
             # Reconcile with a safe GET instead of issuing a second POST.
-            summary = call_zep_read_with_retry(
+            summary = call_graph_read_with_retry(
                 lambda: self.client.batch.get(batch_id=batch_id),
                 operation_name=f"reconcile batch {batch_id}",
             )
             if getattr(summary, "status", None) in {None, "draft"}:
                 raise RuntimeError(
-                    f"Zep batch {batch_id} processing is unconfirmed"
+                    f"Graph batch {batch_id} processing is unconfirmed"
                 ) from error
 
         return BatchSubmission(
@@ -572,11 +530,11 @@ class GraphBuilderService:
         if not 1 <= batch_size <= 350:
             raise ValueError("batch_size must be between 1 and 350")
         if len(chunks) > 50_000:
-            raise ValueError("A Zep batch cannot contain more than 50,000 items")
+            raise ValueError("A Graph batch cannot contain more than 50,000 items")
         oversized = [index for index, chunk in enumerate(chunks) if len(chunk) > 10_000]
         if oversized:
             raise ValueError(
-                f"Zep batch item exceeds 10,000 characters at chunk {oversized[0]}"
+                f"Graph batch item exceeds 10,000 characters at chunk {oversized[0]}"
             )
 
     def _list_batch_items(self, batch_id: str) -> List[Any]:
@@ -584,7 +542,7 @@ class GraphBuilderService:
         cursor: int | None = None
         seen_cursors: set[int] = set()
         while True:
-            page = call_zep_read_with_retry(
+            page = call_graph_read_with_retry(
                 lambda: self.client.batch.list_items(
                     batch_id=batch_id,
                     limit=100,
@@ -597,7 +555,7 @@ class GraphBuilderService:
             if next_cursor is None:
                 break
             if next_cursor == cursor or next_cursor in seen_cursors:
-                raise RuntimeError(f"Zep batch {batch_id} item cursor did not advance")
+                raise RuntimeError(f"Graph batch {batch_id} item cursor did not advance")
             seen_cursors.add(next_cursor)
             cursor = next_cursor
         return items
@@ -623,7 +581,7 @@ class GraphBuilderService:
     def get_batch_summary(self, batch_id: str) -> Any:
         """Read a persisted batch identity for restart reconciliation."""
 
-        return call_zep_read_with_retry(
+        return call_graph_read_with_retry(
             lambda: self.client.batch.get(batch_id=batch_id),
             operation_name=f"get batch {batch_id}",
         )
@@ -636,17 +594,17 @@ class GraphBuilderService:
     ) -> List[str]:
         """Wait for a Batch API terminal state and validate every item."""
 
-        timeout = timeout or ZEP_INGESTION_WAIT_TIMEOUT_SECONDS
+        timeout = timeout or GRAPH_INGESTION_WAIT_TIMEOUT_SECONDS
         start_time = time.time()
         terminal_states = {"succeeded", "partial", "failed", "invalid", "canceled"}
 
         while True:
             if time.time() - start_time > timeout:
                 raise TimeoutError(
-                    f"Zep batch {submission.batch_id} did not finish within {timeout}s"
+                    f"Graph batch {submission.batch_id} did not finish within {timeout}s"
                 )
 
-            summary = call_zep_read_with_retry(
+            summary = call_graph_read_with_retry(
                 lambda: self.client.batch.get(batch_id=submission.batch_id),
                 operation_name=f"poll batch {submission.batch_id}",
             )
@@ -657,7 +615,7 @@ class GraphBuilderService:
                 completed = int(getattr(progress, "succeeded_items", 0) or 0)
                 progress_callback(
                     t(
-                        'progress.zepProcessing',
+                        'progress.graphProcessing',
                         completed=completed,
                         total=submission.item_count,
                         pending=max(submission.item_count - completed, 0),
@@ -678,12 +636,12 @@ class GraphBuilderService:
             ]
             first_error = getattr(failed_items[0], "error", None) if failed_items else None
             raise RuntimeError(
-                f"Zep batch {submission.batch_id} ended as {status}; "
+                f"Graph batch {submission.batch_id} ended as {status}; "
                 f"failed_items={len(failed_items)}; first_error={first_error}"
             )
         if len(items) != submission.item_count:
             raise RuntimeError(
-                f"Zep batch {submission.batch_id} contains {len(items)} items, "
+                f"Graph batch {submission.batch_id} contains {len(items)} items, "
                 f"expected {submission.item_count}"
             )
 
@@ -698,11 +656,11 @@ class GraphBuilderService:
             source_uuid = getattr(item, "source_uuid", None)
             if item_status != "succeeded" or not episode_uuid:
                 raise RuntimeError(
-                    f"Zep batch {submission.batch_id} returned an incomplete item"
+                    f"Graph batch {submission.batch_id} returned an incomplete item"
                 )
             if source_uuid and source_uuid != episode_uuid:
                 raise RuntimeError(
-                    f"Zep batch {submission.batch_id} returned mismatched episode UUIDs"
+                    f"Graph batch {submission.batch_id} returned mismatched episode UUIDs"
                 )
             episode_uuids.append(episode_uuid)
 
@@ -721,9 +679,9 @@ class GraphBuilderService:
         self,
         episode_uuids: List[str],
         progress_callback: Optional[Callable] = None,
-        timeout: int = ZEP_INGESTION_WAIT_TIMEOUT_SECONDS
+        timeout: int = GRAPH_INGESTION_WAIT_TIMEOUT_SECONDS
     ):
-        """等待所有 episode 处理完成（通过查询每个 episode 的 processed 状态）"""
+        """Wait for all episodes to finish processing (by checking each episode's processed status)"""
         if not episode_uuids:
             if progress_callback:
                 progress_callback(t('progress.noEpisodesWait'), 1.0)
@@ -745,13 +703,13 @@ class GraphBuilderService:
                         completed_count / total_episodes
                     )
                 raise TimeoutError(
-                    f"Zep episode processing timed out with "
+                    f"graph store episode processing timed out with "
                     f"{len(pending_episodes)} episode(s) still pending"
                 )
             
-            # 检查每个 episode 的处理状态
+            # Check the processing status of each episode
             for ep_uuid in list(pending_episodes):
-                episode = call_zep_read_with_retry(
+                episode = call_graph_read_with_retry(
                     lambda: self.client.graph.episode.get(uuid_=ep_uuid),
                     operation_name=f"poll episode {ep_uuid}",
                 )
@@ -764,25 +722,25 @@ class GraphBuilderService:
             elapsed = int(time.time() - start_time)
             if progress_callback:
                 progress_callback(
-                    t('progress.zepProcessing', completed=completed_count, total=total_episodes, pending=len(pending_episodes), elapsed=elapsed),
+                    t('progress.graphProcessing', completed=completed_count, total=total_episodes, pending=len(pending_episodes), elapsed=elapsed),
                     completed_count / total_episodes if total_episodes > 0 else 0
                 )
             
             if pending_episodes:
-                time.sleep(3)  # 每3秒检查一次
+                time.sleep(3)  # Check every 3 seconds
         
         if progress_callback:
             progress_callback(t('progress.processingComplete', completed=completed_count, total=total_episodes), 1.0)
     
     def _get_graph_info(self, graph_id: str) -> GraphInfo:
-        """获取图谱信息"""
-        # 获取节点（分页）
+        """Get graph info"""
+        # Get nodes (paginated)
         nodes = fetch_all_nodes(self.client, graph_id)
 
-        # 获取边（分页）
+        # Get edges (paginated)
         edges = fetch_all_edges(self.client, graph_id)
 
-        # 统计实体类型
+        # Count entity types
         entity_types = set()
         for node in nodes:
             if node.labels:
@@ -799,25 +757,25 @@ class GraphBuilderService:
     
     def get_graph_data(self, graph_id: str) -> Dict[str, Any]:
         """
-        获取完整图谱数据（包含详细信息）
+        Get full graph data (with detailed info)
         
         Args:
-            graph_id: 图谱ID
+            graph_id: Graph ID
             
         Returns:
-            包含nodes和edges的字典，包括时间信息、属性等详细数据
+            Dict containing nodes and edges, with detailed data such as time info and attributes
         """
         nodes = fetch_all_nodes(self.client, graph_id)
         edges = fetch_all_edges(self.client, graph_id)
 
-        # 创建节点映射用于获取节点名称
+        # Build node map for looking up node names
         node_map = {}
         for node in nodes:
             node_map[node.uuid_] = node.name or ""
         
         nodes_data = []
         for node in nodes:
-            # 获取创建时间
+            # Get creation time
             created_at = getattr(node, 'created_at', None)
             if created_at:
                 created_at = str(created_at)
@@ -833,20 +791,20 @@ class GraphBuilderService:
         
         edges_data = []
         for edge in edges:
-            # 获取时间信息
+            # Get time info
             created_at = getattr(edge, 'created_at', None)
             valid_at = getattr(edge, 'valid_at', None)
             invalid_at = getattr(edge, 'invalid_at', None)
             expired_at = getattr(edge, 'expired_at', None)
             
-            # 获取 episodes
+            # Get episodes
             episodes = getattr(edge, 'episodes', None) or getattr(edge, 'episode_ids', None)
             if episodes and not isinstance(episodes, list):
                 episodes = [str(episodes)]
             elif episodes:
                 episodes = [str(e) for e in episodes]
             
-            # 获取 fact_type
+            # Get fact_type
             fact_type = getattr(edge, 'fact_type', None) or edge.name or ""
             
             edges_data.append({
@@ -875,5 +833,5 @@ class GraphBuilderService:
         }
     
     def delete_graph(self, graph_id: str):
-        """删除图谱"""
+        """Delete graph"""
         self.client.graph.delete(graph_id=graph_id)

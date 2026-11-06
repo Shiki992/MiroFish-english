@@ -1,6 +1,6 @@
 /**
- * 临时存储待上传的文件和需求
- * 用于首页点击启动引擎后立即跳转，在Process页面再进行API调用
+ * Temporarily stores files and requirements pending upload
+ * Used to navigate immediately after clicking Start Engine on the home page, then make the API call on the Process page
  */
 import { reactive } from 'vue'
 

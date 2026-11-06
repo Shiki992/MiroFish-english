@@ -9,6 +9,25 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from openai import OpenAI
+
+from ..config import Config
+from .anthropic_chat import AnthropicChatClient
+from ..llm_provider import PROVIDER_ANTHROPIC, PROVIDER_OPENAI
+
+
+def create_chat_client(api_key: str, base_url: Optional[str]) -> Any:
+    """Create the client for the configured LLM provider."""
+    if Config.LLM_PROVIDER == PROVIDER_ANTHROPIC:
+        return AnthropicChatClient(
+            api_key=api_key,
+            base_url=base_url,
+            effort=Config.LLM_EFFORT,
+        )
+    if Config.LLM_PROVIDER == PROVIDER_OPENAI:
+        return OpenAI(api_key=api_key, base_url=base_url)
+    raise ValueError(f"Unsupported LLM_PROVIDER: {Config.LLM_PROVIDER}")
+
 
 def is_gpt5_family(model: Optional[str]) -> bool:
     """Return True when model belongs to GPT-5 family aliases/snapshots."""
@@ -34,7 +53,16 @@ def create_chat_completion(
     - For token limit, use `max_completion_tokens` on GPT-5, `max_tokens` otherwise.
     - Preserve the legacy request shape for every non-GPT-5 model/provider.
     - Propagate provider errors unchanged instead of guessing from message text.
+    - Send Claude requests natively, without sampling parameters.
     """
+    if isinstance(client, AnthropicChatClient):
+        return client.create_chat_completion(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
+
     kwargs: Dict[str, Any] = {
         "model": model,
         "messages": messages,

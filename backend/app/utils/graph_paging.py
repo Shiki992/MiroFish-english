@@ -1,21 +1,19 @@
-"""Complete Zep Graph node/edge pagination using opaque response cursors."""
+"""Complete graph store Graph node/edge pagination using opaque response cursors."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
 
-from zep_cloud.client import Zep
-
 from .logger import get_logger
-from .zep import call_zep_read_with_retry
+from .graph_access import call_graph_read_with_retry
 
-logger = get_logger("mirofish.zep_paging")
+logger = get_logger("mirofish.graph_paging")
 
 _DEFAULT_PAGE_SIZE = 100
 _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_RETRY_DELAY = 2.0
-_NEXT_CURSOR_HEADER = "zep-next-cursor"
+_NEXT_CURSOR_HEADER = "graph-next-cursor"
 
 
 def _fetch_page_with_retry(
@@ -28,7 +26,7 @@ def _fetch_page_with_retry(
 ) -> Any:
     """Fetch one read-only page with the shared transient-error policy."""
 
-    return call_zep_read_with_retry(
+    return call_graph_read_with_retry(
         lambda: api_call(*args, **kwargs),
         operation_name=page_description,
         max_attempts=max_retries,
@@ -95,7 +93,7 @@ def _fetch_all(
             if len(all_items) > max_items:
                 all_items = all_items[:max_items]
             logger.warning(
-                "Zep %s pagination reached explicit max_items=%s for graph %s",
+                "graph store %s pagination reached explicit max_items=%s for graph %s",
                 item_name,
                 max_items,
                 graph_id,
@@ -110,7 +108,7 @@ def _fetch_all(
             break
         if next_cursor in seen_cursors or next_cursor == cursor:
             raise RuntimeError(
-                f"Zep {item_name} pagination cursor did not advance for graph {graph_id}"
+                f"graph store {item_name} pagination cursor did not advance for graph {graph_id}"
             )
         seen_cursors.add(next_cursor)
         cursor = next_cursor
@@ -119,7 +117,7 @@ def _fetch_all(
 
 
 def fetch_all_nodes(
-    client: Zep,
+    client: Any,
     graph_id: str,
     page_size: int = _DEFAULT_PAGE_SIZE,
     max_items: int | None = None,
@@ -140,7 +138,7 @@ def fetch_all_nodes(
 
 
 def fetch_all_edges(
-    client: Zep,
+    client: Any,
     graph_id: str,
     page_size: int = _DEFAULT_PAGE_SIZE,
     max_retries: int = _DEFAULT_MAX_RETRIES,
